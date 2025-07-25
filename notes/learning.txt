@@ -1,0 +1,132 @@
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+    @Bean
+    SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http) throws Exception {
+        http.authorizeHttpRequests((requests) -> requests
+                .requestMatchers("/contact").permitAll()
+                .requestMatchers("/public/**").permitAll()
+                .requestMatchers("/admin").denyAll()
+                .requestMatchers("/admin/**").denyAll()
+                .anyRequest().authenticated());
+//        http.formLogin(withDefaults());
+        http.csrf(AbstractHttpConfigurer::disable);
+        http.sessionManagement(session ->
+                session.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
+        http.httpBasic(withDefaults());
+        return http.build();
+    }
+
+}
+
+
+
+//now we have CUSTOM ROLE AND USER, so no need of this:
+@Bean
+    public UserDetailsService userDetailsService(DataSource dataSource){
+        JdbcUserDetailsManager manager =
+                new JdbcUserDetailsManager(dataSource);
+        UserDetails user1 = User.withUsername("user1")
+                .password("{noop}password1")
+                .roles("USER")
+                .build();
+        if(!manager.userExists("user1")){
+            manager.createUser(user1);
+        }
+        if (!manager.userExists("admin")){
+            manager.createUser(
+                    User.withUsername("admin")
+                            .password("{noop}adminPass")
+                            .roles("ADMIN")
+                            .build()
+            );
+        }
+        return manager;
+    }
+
+
+//no need of this creating users and authorities tables to 
+work with JdbcUserDetailsManager
+use secure_notes;
+
+CREATE TABLE users (
+    username VARCHAR(50) NOT NULL PRIMARY KEY,
+    password VARCHAR(100) NOT NULL,
+    enabled BOOLEAN NOT NULL
+);
+
+CREATE TABLE authorities (
+    username VARCHAR(50) NOT NULL,
+    authority VARCHAR(50) NOT NULL,
+    CONSTRAINT fk_authorities_users FOREIGN KEY(username) REFERENCES users(username)
+);
+CREATE UNIQUE INDEX ix_auth_username ON authorities (username, authority);
+
+
+
+
+//Create users and roles in code or insert as sql queries
+use secure_notes;
+INSERT INTO roles (role_name) VALUES ('ROLE_USER');
+INSERT INTO roles (role_name) VALUES ('ROLE_ADMIN');
+
+INSERT INTO users (username, email, password, role_id)
+VALUES ('user1', "user1@example.com', 'password', 1);
+
+INSERT INTO users (username, email, password, role_id)
+VALUES ('admin1', "admin1@example.com', 'password', 1);
+
+
+//CustomLoggingFilter
+package com.secure.notes.security;
+
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.stereotype.Component;
+import org.springframework.web.filter.OncePerRequestFilter;
+import java.io.IOException;
+
+@Component
+public class CustomLoggingFilter extends OncePerRequestFilter {
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+            throws ServletException, IOException {
+        System.out.println("CustomLoggingFilter - Request URI: " + request.getRequestURI());
+        filterChain.doFilter(request, response);
+        System.out.println("CustomLoggingFilter - Response Status: " + response.getStatus());
+    }
+}
+
+
+//RequestValidationFilter
+package com.secure.notes.security;
+
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.stereotype.Component;
+import org.springframework.web.filter.OncePerRequestFilter;
+
+import java.io.IOException;
+
+@Component
+public class RequestValidationFilter extends OncePerRequestFilter {
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+            throws ServletException, IOException {
+        String header = request.getHeader("X-Valid-Request");
+        if (header == null || !header.equals("true")) {
+            response.sendError(HttpServletResponse.SC_BAD_REQUEST, "Invalid request");
+            return;
+        }
+        filterChain.doFilter(request, response);
+    }
+}
+
+//Doing controller level configuration in global file: 3 different ways of doing things
